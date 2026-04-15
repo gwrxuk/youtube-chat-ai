@@ -108,7 +108,7 @@ export default function CharacterGrid({
       </div>
 
       <div className="text-center py-6 text-xs text-gray-600">
-        Powered by GPT-4o &middot; Paste YouTube URLs to discuss videos
+        Powered by GPT-5.4 &middot; Paste YouTube URLs to discuss videos
       </div>
     </div>
   );

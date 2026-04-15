@@ -106,7 +106,7 @@ export default function Sidebar({
           </div>
           <div>
             <p className="text-sm font-medium text-white">YouTube Chat AI</p>
-            <p className="text-xs text-gray-500">GPT-4o Powered</p>
+            <p className="text-xs text-gray-500">GPT-5.4 Powered</p>
           </div>
         </div>
       </div>

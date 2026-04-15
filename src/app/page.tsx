@@ -649,7 +649,7 @@ export default function Home() {
 
               <p className="text-[11px] text-gray-600 text-center mt-2">
                 AI can make mistakes. Videos are processed via transcript or
-                GPT-4o vision.
+                GPT-5.4 with Whisper audio transcription and frame analysis.
               </p>
             </div>
           </div>
