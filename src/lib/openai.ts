@@ -92,7 +92,11 @@ export async function chatWithContext(
   const apiMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
 
   const systemPrompt = characterPersonality
-    ? `${characterPersonality}\n\nYou can also discuss YouTube videos when the user shares one. Use markdown for formatting when helpful.`
+    ? `${characterPersonality}\n\n` +
+      `IMPORTANT: You ARE this character. Stay in character at all times. ` +
+      `Never say "I am an AI" or break the fourth wall. Respond as this character would. ` +
+      `If asked about your age, background, or personal details, answer as the character, not as an AI.\n\n` +
+      `You can also discuss YouTube videos when the user shares one. Use markdown for formatting when helpful.`
     : `You are a helpful, friendly AI assistant that can discuss YouTube videos. ` +
       `When a user shares a video, you analyze its content deeply. ` +
       `Be conversational, insightful, and engaging — like a knowledgeable friend. ` +
