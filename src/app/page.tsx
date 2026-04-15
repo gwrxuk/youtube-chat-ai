@@ -41,6 +41,14 @@ interface Conversation {
   characterId: string;
 }
 
+const YT_URL_RE =
+  /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/;
+
+function extractYoutubeUrl(text: string): string | null {
+  const m = text.match(YT_URL_RE);
+  return m ? m[0] : null;
+}
+
 function genId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
@@ -262,7 +270,33 @@ export default function Home() {
 
     try {
       const conv = conversations.find((c) => c.id === convId);
-      const video = conv?.video || currentVideo;
+      let video = conv?.video || currentVideo;
+
+      // Auto-detect YouTube URL in the message if no video is attached
+      if (!video) {
+        const detectedUrl = extractYoutubeUrl(text);
+        if (detectedUrl) {
+          try {
+            const ytRes = await fetch("/api/youtube", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url: detectedUrl }),
+            });
+            if (ytRes.ok) {
+              const ytData = await ytRes.json();
+              video = ytData as VideoInfo;
+              setCurrentVideo(video);
+              setConversations((prev) =>
+                prev.map((c) =>
+                  c.id === convId ? { ...c, video, title: video?.title || c.title } : c
+                )
+              );
+            }
+          } catch {
+            // Continue without video context
+          }
+        }
+      }
 
       const chatMessages = [...(conv?.messages || []), userMsg].map((m) => ({
         role: m.role as "user" | "assistant",
