@@ -34,7 +34,11 @@ function buildVideoPrefix(vc: VideoContext): string {
     );
   }
 
-  return `[The user is discussing this YouTube video: "${title}"]\n\n`;
+  return (
+    `[The user is discussing this YouTube video: "${title}"]\n` +
+    `Note: No transcript or video data is available for this message. ` +
+    `You only know the title. Be honest about what you can and cannot determine.\n\n`
+  );
 }
 
 export async function chatWithContext(

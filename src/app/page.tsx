@@ -310,7 +310,7 @@ export default function Home() {
         if (video.contextType === "transcript" && video.transcript) {
           videoContext = {
             type: "transcript" as const,
-            transcript: isFirstMessage ? video.transcript : undefined,
+            transcript: video.transcript,
             videoTitle: video.title,
           };
         } else if (video.contextType === "video" && video.videoBase64 && isFirstMessage) {
