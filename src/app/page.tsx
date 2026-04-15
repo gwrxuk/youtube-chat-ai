@@ -197,17 +197,24 @@ export default function Home() {
       }));
 
       let videoContext = undefined;
-      if (video && chatMessages.length <= 2) {
+      if (video) {
+        const isFirstMessage = (conv?.messages || []).filter((m) => m.role === "user").length === 0;
+
         if (video.contextType === "transcript" && video.transcript) {
           videoContext = {
             type: "transcript" as const,
-            transcript: video.transcript,
+            transcript: isFirstMessage ? video.transcript : undefined,
             videoTitle: video.title,
           };
-        } else if (video.contextType === "video" && video.videoBase64) {
+        } else if (video.contextType === "video" && video.videoBase64 && isFirstMessage) {
           videoContext = {
             type: "video" as const,
             videoBase64: video.videoBase64,
+            videoTitle: video.title,
+          };
+        } else {
+          videoContext = {
+            type: "metadata" as const,
             videoTitle: video.title,
           };
         }

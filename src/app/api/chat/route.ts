@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { chatWithContext, ChatMessage } from "@/lib/openai";
+import { chatWithContext, ChatMessage, VideoContext } from "@/lib/openai";
 
 export const maxDuration = 60;
 
@@ -8,12 +8,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { messages, videoContext, characterPersonality } = body as {
       messages: ChatMessage[];
-      videoContext?: {
-        type: "transcript" | "video";
-        transcript?: string;
-        videoBase64?: string;
-        videoTitle?: string;
-      };
+      videoContext?: VideoContext;
       characterPersonality?: string;
     };
 
