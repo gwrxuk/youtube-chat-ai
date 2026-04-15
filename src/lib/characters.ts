@@ -10,8 +10,6 @@ export interface Character {
   isDefault?: boolean;
 }
 
-const STORAGE_KEY = "ytchat_characters";
-
 const COLORS = [
   "#7c5cfc", "#ef4444", "#f59e0b", "#22c55e", "#06b6d4",
   "#ec4899", "#8b5cf6", "#f97316", "#14b8a6", "#6366f1",
@@ -99,40 +97,51 @@ export const DEFAULT_CHARACTERS: Character[] = [
   },
 ];
 
-export function loadCharacters(): Character[] {
-  if (typeof window === "undefined") return DEFAULT_CHARACTERS;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const custom: Character[] = raw ? JSON.parse(raw) : [];
-    return [...DEFAULT_CHARACTERS, ...custom];
-  } catch {
-    return DEFAULT_CHARACTERS;
-  }
+// ─── API-backed persistence ───
+
+export async function fetchCharacters(): Promise<Character[]> {
+  const res = await fetch("/api/characters");
+  if (!res.ok) return DEFAULT_CHARACTERS;
+  const rows = await res.json();
+  if (!Array.isArray(rows) || rows.length === 0) return DEFAULT_CHARACTERS;
+  return rows.map((r: Record<string, unknown>) => ({
+    id: r.id as string,
+    name: r.name as string,
+    tagline: r.tagline as string,
+    description: r.description as string,
+    personality: r.personality as string,
+    avatar: r.avatar as string,
+    color: r.color as string,
+    createdAt: Number(r.created_at) || 0,
+    isDefault: !!r.is_default,
+  }));
 }
 
-export function saveCustomCharacter(char: Character) {
-  if (typeof window === "undefined") return;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const custom: Character[] = raw ? JSON.parse(raw) : [];
-    const idx = custom.findIndex((c) => c.id === char.id);
-    if (idx >= 0) {
-      custom[idx] = char;
-    } else {
-      custom.push(char);
-    }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(custom));
-  } catch {}
+export async function saveCharacterToDb(char: Character) {
+  await fetch("/api/characters", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: char.id,
+      name: char.name,
+      tagline: char.tagline,
+      description: char.description,
+      personality: char.personality,
+      avatar: char.avatar,
+      color: char.color,
+      created_at: char.createdAt || Date.now(),
+    }),
+  });
 }
 
-export function deleteCustomCharacter(id: string) {
-  if (typeof window === "undefined") return;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const custom: Character[] = raw ? JSON.parse(raw) : [];
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(custom.filter((c) => c.id !== id))
-    );
-  } catch {}
+export async function deleteCharacterFromDb(id: string) {
+  await fetch("/api/characters", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+}
+
+export async function initDatabase() {
+  await fetch("/api/init", { method: "POST" });
 }

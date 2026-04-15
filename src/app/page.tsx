@@ -9,9 +9,10 @@ import CharacterGrid from "@/components/CharacterGrid";
 import CharacterModal from "@/components/CharacterModal";
 import {
   Character,
-  loadCharacters,
-  saveCustomCharacter,
-  deleteCustomCharacter,
+  fetchCharacters,
+  saveCharacterToDb,
+  deleteCharacterFromDb,
+  initDatabase,
 } from "@/lib/characters";
 
 interface Message {
@@ -61,8 +62,16 @@ export default function Home() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  const [dbReady, setDbReady] = useState(false);
+
   useEffect(() => {
-    setCharacters(loadCharacters());
+    initDatabase()
+      .then(() => fetchCharacters())
+      .then((chars) => {
+        setCharacters(chars);
+        setDbReady(true);
+      })
+      .catch(() => setDbReady(true));
   }, []);
 
   const charConversations = activeCharacter
@@ -82,20 +91,65 @@ export default function Home() {
     inputRef.current?.focus();
   }, [activeId]);
 
+  // Load conversations when selecting a character
+  useEffect(() => {
+    if (!activeCharacter || !dbReady) return;
+    fetch(`/api/conversations?characterId=${activeCharacter.id}`)
+      .then((r) => r.json())
+      .then((convs) => {
+        if (!Array.isArray(convs)) return;
+        const loaded: Conversation[] = convs.map((c: Record<string, unknown>) => ({
+          id: c.id as string,
+          title: c.title as string,
+          lastMessage: c.last_message as string,
+          timestamp: Number(c.updated_at),
+          messages: [],
+          video: c.video_json ? JSON.parse(c.video_json as string) : null,
+          characterId: c.character_id as string,
+        }));
+        setConversations((prev) => {
+          const otherChars = prev.filter((p) => p.characterId !== activeCharacter.id);
+          return [...otherChars, ...loaded];
+        });
+      })
+      .catch(() => {});
+  }, [activeCharacter, dbReady]);
+
+  // Load messages when selecting a conversation
+  useEffect(() => {
+    if (!activeId || !dbReady) return;
+    fetch(`/api/conversations?id=${activeId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data.messages) return;
+        const msgs: Message[] = (data.messages as Array<Record<string, unknown>>).map((m) => ({
+          id: m.id as string,
+          role: m.role as "user" | "assistant",
+          content: m.content as string,
+        }));
+        setConversations((prev) =>
+          prev.map((c) => (c.id === activeId ? { ...c, messages: msgs } : c))
+        );
+      })
+      .catch(() => {});
+  }, [activeId, dbReady]);
+
   function handleSelectCharacter(char: Character) {
     setActiveCharacter(char);
     setActiveId(null);
     setCurrentVideo(null);
   }
 
-  function handleSaveCharacter(char: Character) {
-    saveCustomCharacter(char);
-    setCharacters(loadCharacters());
+  async function handleSaveCharacter(char: Character) {
+    await saveCharacterToDb(char);
+    const updated = await fetchCharacters();
+    setCharacters(updated);
   }
 
-  function handleDeleteCharacter(id: string) {
-    deleteCustomCharacter(id);
-    setCharacters(loadCharacters());
+  async function handleDeleteCharacter(id: string) {
+    await deleteCharacterFromDb(id);
+    const updated = await fetchCharacters();
+    setCharacters(updated);
     setConversations((prev) => prev.filter((c) => c.characterId !== id));
     if (activeCharacter?.id === id) {
       setActiveCharacter(null);
@@ -105,17 +159,36 @@ export default function Home() {
 
   function createConversation(firstMsg?: string, video?: VideoInfo | null) {
     if (!activeCharacter) return "";
+    const now = Date.now();
     const conv: Conversation = {
       id: genId(),
       title: video?.title || firstMsg?.slice(0, 40) || "New Chat",
       lastMessage: firstMsg || "",
-      timestamp: Date.now(),
+      timestamp: now,
       messages: [],
       video: video || null,
       characterId: activeCharacter.id,
     };
     setConversations((prev) => [conv, ...prev]);
     setActiveId(conv.id);
+
+    // Persist to DB (fire-and-forget)
+    fetch("/api/conversations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversation: {
+          id: conv.id,
+          character_id: activeCharacter.id,
+          title: conv.title,
+          last_message: conv.lastMessage,
+          video_json: video ? JSON.stringify(video) : null,
+          created_at: now,
+          updated_at: now,
+        },
+      }),
+    }).catch(() => {});
+
     return conv.id;
   }
 
@@ -236,6 +309,10 @@ export default function Home() {
       }
 
       const data = await res.json();
+      const newTitle =
+        (conv?.messages || []).length === 0
+          ? video?.title || text.slice(0, 40)
+          : undefined;
 
       setConversations((prev) =>
         prev.map((c) =>
@@ -247,14 +324,46 @@ export default function Home() {
                     ? { ...m, content: data.reply }
                     : m
                 ),
-                title:
-                  c.messages.length <= 2
-                    ? video?.title || text.slice(0, 40)
-                    : c.title,
+                title: newTitle || c.title,
               }
             : c
         )
       );
+
+      // Persist user message, assistant reply, and conversation update
+      const now = Date.now();
+      const persistOps = [
+        fetch("/api/conversations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: { id: userMsg.id, conversation_id: convId, role: "user", content: text, created_at: now },
+          }),
+        }),
+        fetch("/api/conversations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: { id: placeholderMsg.id, conversation_id: convId, role: "assistant", content: data.reply, created_at: now + 1 },
+          }),
+        }),
+        fetch("/api/conversations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversation: {
+              id: convId,
+              character_id: activeCharacter.id,
+              title: newTitle || conv?.title || "New Chat",
+              last_message: text,
+              video_json: video ? JSON.stringify(video) : null,
+              created_at: conv?.timestamp || now,
+              updated_at: now,
+            },
+          }),
+        }),
+      ];
+      Promise.all(persistOps).catch(() => {});
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Something went wrong";
       setConversations((prev) =>
@@ -344,6 +453,11 @@ export default function Home() {
               setActiveId(null);
               setCurrentVideo(null);
             }
+            fetch("/api/conversations", {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id }),
+            }).catch(() => {});
           }}
           onSwitchCharacter={() => {
             setActiveCharacter(null);
