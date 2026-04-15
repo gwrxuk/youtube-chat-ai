@@ -1,13 +1,13 @@
 "use client";
 
-import { X, FileText, Video, Clock } from "lucide-react";
+import { X, FileText, Video, Clock, Mic } from "lucide-react";
 
 interface VideoInfo {
   id: string;
   title: string;
   thumbnail: string;
   duration: string;
-  contextType: "transcript" | "video" | "none";
+  contextType: "transcript" | "audio-visual" | "none";
 }
 
 interface Props {
@@ -39,13 +39,14 @@ export default function VideoCard({ video, onRemove }: Props) {
               <FileText size={10} />
               Transcript loaded
             </span>
-          ) : video.contextType === "video" ? (
+          ) : video.contextType === "audio-visual" ? (
             <span className="flex items-center gap-1 text-xs text-violet-400 bg-violet-400/10 px-2 py-0.5 rounded-full">
-              <Video size={10} />
-              Video loaded (vision)
+              <Mic size={10} />
+              Audio + Frames
             </span>
           ) : (
             <span className="flex items-center gap-1 text-xs text-yellow-400 bg-yellow-400/10 px-2 py-0.5 rounded-full">
+              <Video size={10} />
               Metadata only
             </span>
           )}

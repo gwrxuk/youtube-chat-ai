@@ -3,8 +3,10 @@ import {
   extractVideoId,
   getVideoInfo,
   getTranscript,
-  downloadVideoToBuffer,
+  getVideoFrames,
+  downloadAudioBuffer,
 } from "@/lib/youtube";
+import { transcribeAudio } from "@/lib/openai";
 
 export const maxDuration = 60;
 
@@ -26,6 +28,7 @@ export async function POST(req: NextRequest) {
 
     const info = await getVideoInfo(videoId);
 
+    // 1) Try text transcript first (cheapest, fastest)
     const transcript = await getTranscript(videoId);
 
     if (transcript && transcript.length > 50) {
@@ -36,17 +39,30 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // No transcript — download video to memory for vision API
-    const videoBuffer = await downloadVideoToBuffer(videoId);
-    if (videoBuffer) {
-      const videoBase64 = videoBuffer.toString("base64");
+    // 2) No transcript — extract frames + transcribe audio
+    const [frames, audioData] = await Promise.all([
+      getVideoFrames(videoId),
+      downloadAudioBuffer(videoId),
+    ]);
+
+    let audioTranscript: string | null = null;
+    if (audioData) {
+      audioTranscript = await transcribeAudio(
+        audioData.buffer,
+        audioData.extension
+      );
+    }
+
+    if (audioTranscript || frames.length > 0) {
       return NextResponse.json({
         ...info,
-        contextType: "video" as const,
-        videoBase64,
+        contextType: "audio-visual" as const,
+        audioTranscript: audioTranscript || undefined,
+        frames: frames.length > 0 ? frames : undefined,
       });
     }
 
+    // 3) Nothing worked — metadata only
     return NextResponse.json({
       ...info,
       contextType: "none" as const,

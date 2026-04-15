@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { toFile } from "openai/uploads";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -8,11 +9,33 @@ export interface ChatMessage {
 }
 
 export interface VideoContext {
-  type: "transcript" | "video" | "metadata";
+  type: "transcript" | "audio-visual" | "metadata";
   transcript?: string;
-  videoBase64?: string;
+  audioTranscript?: string;
+  frames?: string[];
   videoTitle?: string;
 }
+
+// ─── Audio transcription via Whisper ───
+
+export async function transcribeAudio(
+  audioBuffer: Buffer,
+  extension: string
+): Promise<string | null> {
+  try {
+    const file = await toFile(audioBuffer, `audio.${extension}`);
+    const result = await openai.audio.transcriptions.create({
+      model: "gpt-4o-mini-transcribe",
+      file,
+    });
+    return result.text && result.text.length > 10 ? result.text : null;
+  } catch (e) {
+    console.error("Whisper transcription failed:", e);
+    return null;
+  }
+}
+
+// ─── Build context prefix ───
 
 function buildVideoPrefix(vc: VideoContext): string {
   const title = vc.videoTitle || "YouTube Video";
@@ -23,6 +46,24 @@ function buildVideoPrefix(vc: VideoContext): string {
       `Here is the full transcript:\n\n${vc.transcript}\n\n` +
       `--- End of transcript ---\n\n`
     );
+  }
+
+  if (vc.type === "audio-visual") {
+    let prefix =
+      `[The user is discussing this YouTube video: "${title}"]\n\n`;
+
+    if (vc.audioTranscript) {
+      prefix +=
+        `Audio transcription (from Whisper):\n\n${vc.audioTranscript}\n\n` +
+        `--- End of audio transcription ---\n\n`;
+    }
+
+    if (vc.frames && vc.frames.length > 0) {
+      prefix +=
+        `I'm also sending ${vc.frames.length} frame(s) captured from the video for visual analysis.\n\n`;
+    }
+
+    return prefix;
   }
 
   if (vc.type === "metadata") {
@@ -40,6 +81,8 @@ function buildVideoPrefix(vc: VideoContext): string {
     `You only know the title. Be honest about what you can and cannot determine.\n\n`
   );
 }
+
+// ─── Chat with context ───
 
 export async function chatWithContext(
   messages: ChatMessage[],
@@ -62,41 +105,39 @@ export async function chatWithContext(
     apiMessages.push({ role: msg.role, content: msg.content });
   }
 
-  // Attach video context to the last user message
   if (videoContext) {
     const lastIdx = apiMessages.length - 1;
     const lastMsg = apiMessages[lastIdx];
 
     if (lastMsg && lastMsg.role === "user") {
-      if (videoContext.type === "video" && videoContext.videoBase64) {
-        const textContent =
-          buildVideoPrefix(videoContext) +
-          `The video has no subtitles. I'm sending the video directly for you to analyze.\n\n` +
-          (lastMsg.content as string);
+      const prefix = buildVideoPrefix(videoContext);
+      const userText = prefix + (lastMsg.content as string);
 
-        apiMessages[lastIdx] = {
-          role: "user",
-          content: [
-            { type: "text", text: textContent },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:video/mp4;base64,${videoContext.videoBase64}`,
-                detail: "auto",
-              },
-            },
-          ],
-        };
+      if (
+        videoContext.type === "audio-visual" &&
+        videoContext.frames &&
+        videoContext.frames.length > 0
+      ) {
+        const parts: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
+          { type: "text", text: userText },
+        ];
+
+        for (const frame of videoContext.frames) {
+          parts.push({
+            type: "image_url",
+            image_url: { url: frame, detail: "high" },
+          });
+        }
+
+        apiMessages[lastIdx] = { role: "user", content: parts };
       } else {
-        // Transcript or metadata — prepend context to the text
-        const prefix = buildVideoPrefix(videoContext);
-        lastMsg.content = prefix + (lastMsg.content as string);
+        lastMsg.content = userText;
       }
     }
   }
 
   const response = await openai.chat.completions.create({
-    model: "gpt-4o",
+    model: "gpt-5.4",
     messages: apiMessages,
     max_tokens: 4096,
     temperature: 0.7,

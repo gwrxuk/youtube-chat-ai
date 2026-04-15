@@ -57,29 +57,64 @@ export async function getTranscript(videoId: string): Promise<string | null> {
   }
 }
 
-const MAX_VIDEO_BYTES = 18 * 1024 * 1024;
+/**
+ * Grab YouTube's auto-generated thumbnails at different timestamps
+ * as base64 data URIs. These are available for every video without
+ * needing ffmpeg.
+ *
+ * - /0.jpg = custom thumbnail (or default)
+ * - /1.jpg, /2.jpg, /3.jpg = auto-generated at ~25%, 50%, 75%
+ */
+export async function getVideoFrames(videoId: string): Promise<string[]> {
+  const urls = [
+    `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+    `https://img.youtube.com/vi/${videoId}/1.jpg`,
+    `https://img.youtube.com/vi/${videoId}/2.jpg`,
+    `https://img.youtube.com/vi/${videoId}/3.jpg`,
+  ];
 
-export async function downloadVideoToBuffer(
+  const frames: string[] = [];
+  const results = await Promise.allSettled(
+    urls.map(async (url) => {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const buf = Buffer.from(await res.arrayBuffer());
+      return `data:image/jpeg;base64,${buf.toString("base64")}`;
+    })
+  );
+
+  for (const r of results) {
+    if (r.status === "fulfilled" && r.value) frames.push(r.value);
+  }
+  return frames;
+}
+
+const MAX_AUDIO_BYTES = 24 * 1024 * 1024; // Whisper limit is 25MB
+
+export interface AudioData {
+  buffer: Buffer;
+  mimeType: string;
+  extension: string;
+}
+
+export async function downloadAudioBuffer(
   videoId: string
-): Promise<Buffer | null> {
+): Promise<AudioData | null> {
   try {
-    // Dynamic import so build doesn't evaluate the module at compile time
     const ytdl = (await import("@distube/ytdl-core")).default;
 
     const url = `https://www.youtube.com/watch?v=${videoId}`;
     const info = await ytdl.getInfo(url);
 
-    const format =
-      ytdl.chooseFormat(info.formats, {
-        quality: "lowest",
-        filter: "videoandaudio",
-      }) ||
-      ytdl.chooseFormat(info.formats, {
-        quality: "lowest",
-        filter: "video",
-      });
+    const format = ytdl.chooseFormat(info.formats, {
+      quality: "lowestaudio",
+      filter: "audioonly",
+    });
 
     if (!format) return null;
+
+    const mime = format.mimeType?.split(";")[0] || "audio/mp4";
+    const ext = mime.includes("webm") ? "webm" : "m4a";
 
     const stream = ytdl.downloadFromInfo(info, { format });
     const chunks: Buffer[] = [];
@@ -88,16 +123,18 @@ export async function downloadVideoToBuffer(
     for await (const chunk of stream) {
       const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       totalBytes += buf.length;
-      if (totalBytes > MAX_VIDEO_BYTES) {
+      if (totalBytes > MAX_AUDIO_BYTES) {
         stream.destroy();
         break;
       }
       chunks.push(buf);
     }
 
-    return chunks.length > 0 ? Buffer.concat(chunks) : null;
+    return chunks.length > 0
+      ? { buffer: Buffer.concat(chunks), mimeType: mime, extension: ext }
+      : null;
   } catch (e) {
-    console.error("Video download failed:", e);
+    console.error("Audio download failed:", e);
     return null;
   }
 }

@@ -26,9 +26,10 @@ interface VideoInfo {
   title: string;
   thumbnail: string;
   duration: string;
-  contextType: "transcript" | "video" | "none";
+  contextType: "transcript" | "audio-visual" | "none";
   transcript?: string;
-  videoBase64?: string;
+  audioTranscript?: string;
+  frames?: string[];
 }
 
 interface Conversation {
@@ -313,10 +314,11 @@ export default function Home() {
             transcript: video.transcript,
             videoTitle: video.title,
           };
-        } else if (video.contextType === "video" && video.videoBase64 && isFirstMessage) {
+        } else if (video.contextType === "audio-visual") {
           videoContext = {
-            type: "video" as const,
-            videoBase64: video.videoBase64,
+            type: "audio-visual" as const,
+            audioTranscript: video.audioTranscript,
+            frames: isFirstMessage ? video.frames : undefined,
             videoTitle: video.title,
           };
         } else {
