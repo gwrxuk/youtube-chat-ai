@@ -20,18 +20,19 @@ export async function chatWithContext(
     transcript?: string;
     videoBase64?: string;
     videoTitle?: string;
-  }
+  },
+  characterPersonality?: string
 ): Promise<string> {
   const apiMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
 
-  apiMessages.push({
-    role: "system",
-    content:
-      `You are a helpful, friendly AI assistant that can discuss YouTube videos. ` +
+  const systemPrompt = characterPersonality
+    ? `${characterPersonality}\n\nYou can also discuss YouTube videos when the user shares one. Use markdown for formatting when helpful.`
+    : `You are a helpful, friendly AI assistant that can discuss YouTube videos. ` +
       `When a user shares a video, you analyze its content deeply. ` +
       `Be conversational, insightful, and engaging — like a knowledgeable friend. ` +
-      `Use markdown for formatting when helpful. Keep responses concise but thorough.`,
-  });
+      `Use markdown for formatting when helpful. Keep responses concise but thorough.`;
+
+  apiMessages.push({ role: "system", content: systemPrompt });
 
   for (const msg of messages) {
     if (msg.role === "system") continue;

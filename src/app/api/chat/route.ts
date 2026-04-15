@@ -6,7 +6,7 @@ export const maxDuration = 60;
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { messages, videoContext } = body as {
+    const { messages, videoContext, characterPersonality } = body as {
       messages: ChatMessage[];
       videoContext?: {
         type: "transcript" | "video";
@@ -14,6 +14,7 @@ export async function POST(req: NextRequest) {
         videoBase64?: string;
         videoTitle?: string;
       };
+      characterPersonality?: string;
     };
 
     if (!messages || !Array.isArray(messages)) {
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const reply = await chatWithContext(messages, videoContext);
+    const reply = await chatWithContext(messages, videoContext, characterPersonality);
 
     return NextResponse.json({ reply });
   } catch (err: unknown) {

@@ -1,10 +1,18 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, KeyboardEvent } from "react";
-import { Send, Link, Loader2, Youtube, Sparkles } from "lucide-react";
+import { Send, Link, Loader2, Youtube } from "lucide-react";
 import ChatMessage from "@/components/ChatMessage";
 import VideoCard from "@/components/VideoCard";
 import Sidebar from "@/components/Sidebar";
+import CharacterGrid from "@/components/CharacterGrid";
+import CharacterModal from "@/components/CharacterModal";
+import {
+  Character,
+  loadCharacters,
+  saveCustomCharacter,
+  deleteCustomCharacter,
+} from "@/lib/characters";
 
 interface Message {
   id: string;
@@ -29,6 +37,7 @@ interface Conversation {
   timestamp: number;
   messages: Message[];
   video: VideoInfo | null;
+  characterId: string;
 }
 
 function genId() {
@@ -36,6 +45,8 @@ function genId() {
 }
 
 export default function Home() {
+  const [characters, setCharacters] = useState<Character[]>([]);
+  const [activeCharacter, setActiveCharacter] = useState<Character | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState("");
@@ -44,9 +55,19 @@ export default function Home() {
   const [loadingVideo, setLoadingVideo] = useState(false);
   const [loadingChat, setLoadingChat] = useState(false);
   const [currentVideo, setCurrentVideo] = useState<VideoInfo | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingChar, setEditingChar] = useState<Character | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    setCharacters(loadCharacters());
+  }, []);
+
+  const charConversations = activeCharacter
+    ? conversations.filter((c) => c.characterId === activeCharacter.id)
+    : [];
 
   const activeConv = conversations.find((c) => c.id === activeId) || null;
   const messages = activeConv?.messages || [];
@@ -61,7 +82,29 @@ export default function Home() {
     inputRef.current?.focus();
   }, [activeId]);
 
+  function handleSelectCharacter(char: Character) {
+    setActiveCharacter(char);
+    setActiveId(null);
+    setCurrentVideo(null);
+  }
+
+  function handleSaveCharacter(char: Character) {
+    saveCustomCharacter(char);
+    setCharacters(loadCharacters());
+  }
+
+  function handleDeleteCharacter(id: string) {
+    deleteCustomCharacter(id);
+    setCharacters(loadCharacters());
+    setConversations((prev) => prev.filter((c) => c.characterId !== id));
+    if (activeCharacter?.id === id) {
+      setActiveCharacter(null);
+      setActiveId(null);
+    }
+  }
+
   function createConversation(firstMsg?: string, video?: VideoInfo | null) {
+    if (!activeCharacter) return "";
     const conv: Conversation = {
       id: genId(),
       title: video?.title || firstMsg?.slice(0, 40) || "New Chat",
@@ -69,6 +112,7 @@ export default function Home() {
       timestamp: Date.now(),
       messages: [],
       video: video || null,
+      characterId: activeCharacter.id,
     };
     setConversations((prev) => [conv, ...prev]);
     setActiveId(conv.id);
@@ -113,7 +157,7 @@ export default function Home() {
 
   async function handleSend() {
     const text = input.trim();
-    if (!text || loadingChat) return;
+    if (!text || loadingChat || !activeCharacter) return;
 
     let convId = activeId;
     if (!convId) {
@@ -172,7 +216,11 @@ export default function Home() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: chatMessages, videoContext }),
+        body: JSON.stringify({
+          messages: chatMessages,
+          videoContext,
+          characterPersonality: activeCharacter.personality,
+        }),
       });
 
       if (!res.ok) {
@@ -237,178 +285,226 @@ export default function Home() {
     }
   }
 
+  // ─── Character selection screen ───
+  if (!activeCharacter) {
+    return (
+      <>
+        <CharacterGrid
+          characters={characters}
+          onSelect={handleSelectCharacter}
+          onCreate={() => {
+            setEditingChar(null);
+            setModalOpen(true);
+          }}
+          onEdit={(char) => {
+            setEditingChar(char);
+            setModalOpen(true);
+          }}
+          onDelete={handleDeleteCharacter}
+        />
+        <CharacterModal
+          character={editingChar}
+          open={modalOpen}
+          onClose={() => setModalOpen(false)}
+          onSave={handleSaveCharacter}
+        />
+      </>
+    );
+  }
+
+  // ─── Chat screen ───
   const video = activeConv?.video || currentVideo;
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <Sidebar
-        conversations={conversations}
-        activeId={activeId}
-        onSelect={(id) => {
-          setActiveId(id);
-          const conv = conversations.find((c) => c.id === id);
-          setCurrentVideo(conv?.video || null);
-        }}
-        onNew={() => {
-          setActiveId(null);
-          setCurrentVideo(null);
-        }}
-        onDelete={(id) => {
-          setConversations((prev) => prev.filter((c) => c.id !== id));
-          if (activeId === id) {
+    <>
+      <div className="flex h-screen overflow-hidden">
+        <Sidebar
+          character={activeCharacter}
+          conversations={charConversations}
+          activeId={activeId}
+          onSelect={(id) => {
+            setActiveId(id);
+            const conv = conversations.find((c) => c.id === id);
+            setCurrentVideo(conv?.video || null);
+          }}
+          onNew={() => {
             setActiveId(null);
             setCurrentVideo(null);
-          }
-        }}
-      />
+          }}
+          onDelete={(id) => {
+            setConversations((prev) => prev.filter((c) => c.id !== id));
+            if (activeId === id) {
+              setActiveId(null);
+              setCurrentVideo(null);
+            }
+          }}
+          onSwitchCharacter={() => {
+            setActiveCharacter(null);
+            setActiveId(null);
+            setCurrentVideo(null);
+          }}
+        />
 
-      <div className="flex-1 flex flex-col h-full">
-        {/* Messages area */}
-        <div className="flex-1 overflow-y-auto">
-          {messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center px-4">
-              <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-accent to-violet-600 flex items-center justify-center mb-6 shadow-lg shadow-accent/20">
-                <Sparkles size={36} className="text-white" />
+        <div className="flex-1 flex flex-col h-full">
+          {/* Messages area */}
+          <div className="flex-1 overflow-y-auto">
+            {messages.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center px-4">
+                <div
+                  className="w-20 h-20 rounded-3xl flex items-center justify-center mb-6 text-4xl shadow-lg"
+                  style={{ background: `${activeCharacter.color}15`, boxShadow: `0 8px 32px ${activeCharacter.color}15` }}
+                >
+                  {activeCharacter.avatar}
+                </div>
+                <h1 className="text-2xl font-bold text-white mb-1">
+                  {activeCharacter.name}
+                </h1>
+                <p className="text-gray-400 text-center max-w-md mb-2 text-sm">
+                  {activeCharacter.tagline}
+                </p>
+                {activeCharacter.description && (
+                  <p className="text-gray-500 text-center max-w-md mb-8 text-xs">
+                    {activeCharacter.description}
+                  </p>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full">
+                  {[
+                    "Summarize this video for me",
+                    "What are the key takeaways?",
+                    "Explain the main argument",
+                    "What music is playing?",
+                  ].map((suggestion) => (
+                    <button
+                      key={suggestion}
+                      onClick={() => setInput(suggestion)}
+                      className="text-left text-sm text-gray-400 bg-surface-2 hover:bg-surface-3 border border-surface-4 rounded-xl px-4 py-3 transition-colors"
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <h1 className="text-3xl font-bold text-white mb-2">
-                YouTube Chat AI
-              </h1>
-              <p className="text-gray-400 text-center max-w-md mb-8">
-                Paste a YouTube URL and chat with AI about the video.
-                Works with subtitles or sends the video directly to GPT-4o
-                vision for music videos and other content without captions.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full">
-                {[
-                  "Summarize this video for me",
-                  "What are the key takeaways?",
-                  "Explain the main argument",
-                  "What music is playing?",
-                ].map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    onClick={() => setInput(suggestion)}
-                    className="text-left text-sm text-gray-400 bg-surface-2 hover:bg-surface-3 border border-surface-4 rounded-xl px-4 py-3 transition-colors"
-                  >
-                    {suggestion}
-                  </button>
+            ) : (
+              <div className="max-w-3xl mx-auto py-4">
+                {messages.map((msg) => (
+                  <ChatMessage
+                    key={msg.id}
+                    role={msg.role}
+                    content={msg.content}
+                    isStreaming={
+                      loadingChat && msg.role === "assistant" && !msg.content
+                    }
+                    characterAvatar={activeCharacter.avatar}
+                    characterColor={activeCharacter.color}
+                  />
                 ))}
-              </div>
-            </div>
-          ) : (
-            <div className="max-w-3xl mx-auto py-4">
-              {messages.map((msg) => (
-                <ChatMessage
-                  key={msg.id}
-                  role={msg.role}
-                  content={msg.content}
-                  isStreaming={loadingChat && msg.role === "assistant" && !msg.content}
-                />
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </div>
-
-        {/* Input area */}
-        <div className="border-t border-surface-3 bg-surface-1 px-4 py-3">
-          <div className="max-w-3xl mx-auto">
-            {/* Video card */}
-            {video && (
-              <div className="mb-3">
-                <VideoCard video={video} onRemove={removeVideo} />
+                <div ref={messagesEndRef} />
               </div>
             )}
+          </div>
 
-            {/* YouTube URL input */}
-            {showUrlInput && (
-              <div className="flex items-center gap-2 mb-3 bg-surface-2 rounded-xl px-3 py-2 border border-surface-4">
-                <Youtube size={18} className="text-red-500 flex-shrink-0" />
-                <input
-                  type="text"
-                  value={youtubeUrl}
-                  onChange={(e) => setYoutubeUrl(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleLoadVideo();
-                    if (e.key === "Escape") setShowUrlInput(false);
-                  }}
-                  placeholder="Paste YouTube URL here..."
-                  className="flex-1 bg-transparent text-white text-sm outline-none placeholder:text-gray-500"
-                  autoFocus
-                />
+          {/* Input area */}
+          <div className="border-t border-surface-3 bg-surface-1 px-4 py-3">
+            <div className="max-w-3xl mx-auto">
+              {video && (
+                <div className="mb-3">
+                  <VideoCard video={video} onRemove={removeVideo} />
+                </div>
+              )}
+
+              {showUrlInput && (
+                <div className="flex items-center gap-2 mb-3 bg-surface-2 rounded-xl px-3 py-2 border border-surface-4">
+                  <Youtube size={18} className="text-red-500 flex-shrink-0" />
+                  <input
+                    type="text"
+                    value={youtubeUrl}
+                    onChange={(e) => setYoutubeUrl(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleLoadVideo();
+                      if (e.key === "Escape") setShowUrlInput(false);
+                    }}
+                    placeholder="Paste YouTube URL here..."
+                    className="flex-1 bg-transparent text-white text-sm outline-none placeholder:text-gray-500"
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleLoadVideo}
+                    disabled={loadingVideo || !youtubeUrl.trim()}
+                    className="px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1"
+                  >
+                    {loadingVideo ? (
+                      <>
+                        <Loader2 size={12} className="animate-spin" />
+                        Loading...
+                      </>
+                    ) : (
+                      "Load"
+                    )}
+                  </button>
+                </div>
+              )}
+
+              <div className="flex items-end gap-2 bg-surface-2 rounded-2xl px-4 py-3 border border-surface-4 focus-within:border-accent/50 transition-colors">
                 <button
-                  onClick={handleLoadVideo}
-                  disabled={loadingVideo || !youtubeUrl.trim()}
-                  className="px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1"
+                  onClick={() => setShowUrlInput(!showUrlInput)}
+                  className={`flex-shrink-0 p-2 rounded-xl transition-colors ${
+                    showUrlInput
+                      ? "bg-red-600/20 text-red-400"
+                      : "text-gray-500 hover:text-white hover:bg-surface-3"
+                  }`}
+                  title="Attach YouTube video"
                 >
-                  {loadingVideo ? (
-                    <>
-                      <Loader2 size={12} className="animate-spin" />
-                      Loading...
-                    </>
+                  <Link size={18} />
+                </button>
+
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={
+                    video
+                      ? `Ask ${activeCharacter.name} about "${video.title}"...`
+                      : `Message ${activeCharacter.name}...`
+                  }
+                  rows={1}
+                  className="flex-1 bg-transparent text-white text-sm outline-none resize-none max-h-32 placeholder:text-gray-500"
+                  style={{ height: "auto", minHeight: "24px" }}
+                  onInput={(e) => {
+                    const target = e.target as HTMLTextAreaElement;
+                    target.style.height = "auto";
+                    target.style.height = target.scrollHeight + "px";
+                  }}
+                />
+
+                <button
+                  onClick={handleSend}
+                  disabled={!input.trim() || loadingChat}
+                  className="flex-shrink-0 p-2 bg-accent hover:bg-accent-dim disabled:opacity-30 text-white rounded-xl transition-colors"
+                >
+                  {loadingChat ? (
+                    <Loader2 size={18} className="animate-spin" />
                   ) : (
-                    "Load"
+                    <Send size={18} />
                   )}
                 </button>
               </div>
-            )}
 
-            {/* Main input */}
-            <div className="flex items-end gap-2 bg-surface-2 rounded-2xl px-4 py-3 border border-surface-4 focus-within:border-accent/50 transition-colors">
-              <button
-                onClick={() => setShowUrlInput(!showUrlInput)}
-                className={`flex-shrink-0 p-2 rounded-xl transition-colors ${
-                  showUrlInput
-                    ? "bg-red-600/20 text-red-400"
-                    : "text-gray-500 hover:text-white hover:bg-surface-3"
-                }`}
-                title="Attach YouTube video"
-              >
-                <Link size={18} />
-              </button>
-
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={
-                  video
-                    ? `Ask anything about "${video.title}"...`
-                    : "Type a message... (attach a YouTube video with the link button)"
-                }
-                rows={1}
-                className="flex-1 bg-transparent text-white text-sm outline-none resize-none max-h-32 placeholder:text-gray-500"
-                style={{
-                  height: "auto",
-                  minHeight: "24px",
-                }}
-                onInput={(e) => {
-                  const target = e.target as HTMLTextAreaElement;
-                  target.style.height = "auto";
-                  target.style.height = target.scrollHeight + "px";
-                }}
-              />
-
-              <button
-                onClick={handleSend}
-                disabled={!input.trim() || loadingChat}
-                className="flex-shrink-0 p-2 bg-accent hover:bg-accent-dim disabled:opacity-30 text-white rounded-xl transition-colors"
-              >
-                {loadingChat ? (
-                  <Loader2 size={18} className="animate-spin" />
-                ) : (
-                  <Send size={18} />
-                )}
-              </button>
+              <p className="text-[11px] text-gray-600 text-center mt-2">
+                AI can make mistakes. Videos are processed via transcript or
+                GPT-4o vision.
+              </p>
             </div>
-
-            <p className="text-[11px] text-gray-600 text-center mt-2">
-              AI can make mistakes. Videos are processed via transcript or GPT-4o vision.
-            </p>
           </div>
         </div>
       </div>
-    </div>
+
+      <CharacterModal
+        character={editingChar}
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onSave={handleSaveCharacter}
+      />
+    </>
   );
 }
